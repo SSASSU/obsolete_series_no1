@@ -40,6 +40,18 @@ function makeCanvasRenderer(canvasId: string): {
     const cw = canvas.width, ch = canvas.height
     ctx.clearRect(0, 0, cw, ch)
 
+    // 프레임 로드 전 — 펄스 바만 그리고 종료
+    if (!engine.naturalWidth || !engine.naturalHeight) {
+      if (engine.loadPhase === 1) {
+        const pulse = 0.5 + 0.5 * Math.abs(Math.sin(timeAcc / 400))
+        ctx.globalAlpha = 0.75 * pulse
+        ctx.fillStyle   = '#FF6600'
+        ctx.fillRect(0, ch - 3, cw, 3)
+        ctx.globalAlpha = 1
+      }
+      return
+    }
+
     const scale = Math.max(cw / engine.naturalWidth, ch / engine.naturalHeight)
     const dw = engine.naturalWidth  * scale
     const dh = engine.naturalHeight * scale
@@ -300,12 +312,11 @@ function onComboUpdate(rank: string): void {
 }
 
 // ── 초기화 ───────────────────────────────────────────
-window.addEventListener('load', async () => {
+window.addEventListener('load', () => {
   window.electronAPI.onMemeConfig((config) => showMeme(config.id))
   window.electronAPI.onSpeedUpdate(onWpmUpdate)
   window.electronAPI.onComboUpdate(onComboUpdate)
   window.electronAPI.onStateUpdate(onStateChange)
   requestAnimationFrame(renderLoop)
-  await loadMemeEngine(activeMeme)
-  showMeme(activeMeme)
+  showMeme(activeMeme)  // scene active + loadMemeEngine 즉시 시작
 })
