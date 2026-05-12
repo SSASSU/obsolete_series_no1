@@ -1,54 +1,3 @@
-import { parseGIF, decompressFrame } from 'gifuct-js'
-
-// 4 모서리에서 flood fill — 배경과 연결된 픽셀만 제거해 객체 경계 보존
-// forceRemove=true: 배경이 어두워도 강제 제거 (glow 마스크 전용)
-function removeBackgroundFlood(
-  ctx: OffscreenCanvasRenderingContext2D,
-  w: number, h: number,
-  threshold = 32,
-  forceRemove = false
-): void {
-  const data    = ctx.getImageData(0, 0, w, h)
-  const d       = data.data
-  const visited = new Uint8Array(w * h)
-  const queue   = new Int32Array(w * h)
-  let head = 0, tail = 0
-
-  const corners = [0, w - 1, (h - 1) * w, (h - 1) * w + (w - 1)]
-  let bgR = 0, bgG = 0, bgB = 0
-  for (const c of corners) { bgR += d[c*4]; bgG += d[c*4+1]; bgB += d[c*4+2] }
-  bgR = Math.round(bgR / 4); bgG = Math.round(bgG / 4); bgB = Math.round(bgB / 4)
-
-  // 어두운 배경은 제거하지 않음 (glow 마스크용 forceRemove는 예외)
-  if (!forceRemove && (bgR + bgG + bgB) / 3 < 80) return
-
-  const seed = (idx: number) => {
-    if (visited[idx]) return
-    visited[idx] = 1
-    queue[tail++] = idx
-  }
-
-  for (let x = 0; x < w; x++) { seed(x); seed((h - 1) * w + x) }
-  for (let y = 1; y < h - 1; y++) { seed(y * w); seed(y * w + w - 1) }
-
-  while (head < tail) {
-    const idx = queue[head++]
-    const pi  = idx * 4
-    if (d[pi+3] === 0) continue
-    if (Math.abs(d[pi]   - bgR) > threshold ||
-        Math.abs(d[pi+1] - bgG) > threshold ||
-        Math.abs(d[pi+2] - bgB) > threshold) continue
-    d[pi] = d[pi+1] = d[pi+2] = d[pi+3] = 0
-    const x = idx % w, y = (idx / w) | 0
-    if (x > 0)     seed(idx - 1)
-    if (x < w - 1) seed(idx + 1)
-    if (y > 0)     seed(idx - w)
-    if (y < h - 1) seed(idx + w)
-  }
-
-  ctx.putImageData(data, 0, 0)
-}
-
 interface Frame {
   bitmap: ImageBitmap
   delay:  number   // ms
@@ -60,103 +9,74 @@ export class GifEngine {
 
   private frames:    Frame[]       = []
   private glowMask:  ImageBitmap[] = []  // lazy — buildGlowMask() 첫 호출 시 생성
-  private rawBuf:    ArrayBuffer | null = null  // glow mask lazy 생성용 원본 보관
+  private rawBuf:    ArrayBuffer | null = null
   private idx        = 0
   private elapsed    = 0
   private rate       = 1.0
   running             = false
-  lerpProgress        = 1  // 0→1 during background lerp, 1 = done
-  loadPhase           = 0  // 0=idle, 1=loading frames, 2=lerp expanding
+  lerpProgress        = 1
+  loadPhase           = 0  // 0=idle, 1=loading, 2=lerp
   private forceMsPerFrame: number | null = null
 
   async load(buf: ArrayBuffer): Promise<void> {
     this.loadPhase = 1
-    this.rawBuf = buf  // glow mask lazy 생성을 위해 보관
+    this.rawBuf    = buf
 
-    await new Promise<void>(r => setTimeout(r, 0))  // yield — 렌더 루프가 펄스 바 그릴 기회
+    await new Promise<void>(r => setTimeout(r, 0))  // yield — 펄스 바 첫 그리기 기회
 
-    const gif = parseGIF(buf)
-    this.naturalWidth  = gif.lsd.width
-    this.naturalHeight = gif.lsd.height
+    let frameCount = 0
+    let resolveLoad!: () => void
+    const loadDone = new Promise<void>(r => { resolveLoad = r })
 
-    // 한 번에 모든 프레임 압축 해제하면 10초간 스레드 블로킹 → 프레임마다 yield
-    const raw: ReturnType<typeof decompressFrame>[] = []
-    for (let i = 0; i < gif.frames.length; i++) {
-      raw.push(decompressFrame(gif.frames[i], gif.gct, true))
-      if ((i & 7) === 7) await new Promise<void>(r => setTimeout(r, 0))
-    }
+    // GIF 디코딩을 별도 Worker 스레드에서 실행 — 메인 스레드 블로킹 없음
+    const worker = new Worker(new URL('./gif-worker.ts', import.meta.url), { type: 'module' })
 
-    const W = this.naturalWidth
-    const H = this.naturalHeight
-
-    const hasTransparency = raw.some(
-      f => (f as { transparentIndex?: number }).transparentIndex != null &&
-           (f as { transparentIndex?: number }).transparentIndex! >= 0
-    )
-
-    const oc  = new OffscreenCanvas(W, H)
-    const ctx = oc.getContext('2d', { willReadFrequently: true })!
-    ctx.clearRect(0, 0, W, H)
-
-    let prevDisposal = 2
-    let snapshot: ImageData | null = null
-    const bitmaps: Frame[] = []
-
-    for (const f of raw) {
-      if (hasTransparency) {
-        switch (prevDisposal) {
-          case 2: ctx.clearRect(0, 0, W, H);                    break
-          case 3: if (snapshot) ctx.putImageData(snapshot, 0, 0); break
-          default: break
+    worker.onmessage = ({ data: msg }) => {
+      if (msg.type === 'meta') {
+        this.naturalWidth  = msg.W
+        this.naturalHeight = msg.H
+        frameCount         = msg.frameCount
+      } else if (msg.type === 'frame') {
+        this.frames.push({ bitmap: msg.bitmap, delay: msg.delay })
+        // 첫 프레임 도착 — 즉시 재생 시작, 진행 바로 전환
+        if (this.frames.length === 1) {
+          this.idx       = 0
+          this.elapsed   = 0
+          this.loadPhase = 2
+          this.running   = true
         }
-      } else {
-        ctx.clearRect(0, 0, W, H)
+        this.lerpProgress = (msg.index + 1) / Math.max(frameCount, 1)
+      } else if (msg.type === 'done') {
+        worker.terminate()
+        resolveLoad()
       }
-
-      if ((f.disposalType ?? 0) === 3) {
-        snapshot = ctx.getImageData(0, 0, W, H)
-      }
-
-      const tmp    = new OffscreenCanvas(f.dims.width, f.dims.height)
-      const tmpCtx = tmp.getContext('2d')!
-      tmpCtx.putImageData(
-        new ImageData(new Uint8ClampedArray(f.patch), f.dims.width, f.dims.height),
-        0, 0
-      )
-      ctx.drawImage(tmp, f.dims.left, f.dims.top)
-
-      if (!hasTransparency) {
-        removeBackgroundFlood(ctx, W, H)
-      }
-
-      bitmaps.push({
-        bitmap: await createImageBitmap(oc),
-        delay:  Math.max((f.delay ?? 10) * 10, 20)
-      })
-
-      prevDisposal = f.disposalType ?? 0
+    }
+    worker.onerror = (e) => {
+      console.error('[gif-worker]', e)
+      worker.terminate()
+      resolveLoad()
     }
 
-    // 원본 프레임 즉시 표시 — 고양이 바로 등장
-    this.frames      = bitmaps
-    this.idx         = 0
-    this.elapsed     = 0
-    this.loadPhase   = 2
-    this.lerpProgress = 0
+    // buf를 복사해 Worker에 전달 — 원본은 glow mask 생성용으로 보관
+    const workerBuf = buf.slice(0)
+    worker.postMessage({ buf: workerBuf, forGlowMask: false }, [workerBuf])
 
-    const delays = bitmaps.map(f => f.delay)
-    console.log(`[GifEngine] ${W}×${H}, ${bitmaps.length} raw frames ready, lerp expanding in background`)
+    await loadDone  // Worker 완료까지 대기 (메인 스레드는 자유롭게 실행)
+
+    const rawFrames = [...this.frames]
+    const W = this.naturalWidth, H = this.naturalHeight
+    this.lerpProgress = 0
+    console.log(`[GifEngine] ${W}×${H}, ${rawFrames.length} raw frames ready, lerp expanding in background`)
 
     // lerp 확장은 백그라운드에서 — 완료 후 교체
-    this.lerpExpand(bitmaps, W, H, 24).then(expanded => {
-      const ratio   = this.frames.length > 0 ? this.idx / this.frames.length : 0
-      this.frames   = expanded
-      this.idx      = Math.min(Math.floor(ratio * expanded.length), expanded.length - 1)
+    this.lerpExpand(rawFrames, W, H, 24).then(expanded => {
+      const ratio = rawFrames.length > 0 ? this.idx / rawFrames.length : 0
+      this.frames  = expanded
+      this.idx     = Math.min(Math.floor(ratio * expanded.length), expanded.length - 1)
       this.lerpProgress = 1
       this.loadPhase    = 0
-      const minDelay = Math.min(...delays)
-      const maxDelay = Math.max(...delays)
-      console.log(`[GifEngine] lerp done: ${expanded.length} frames, delay ${minDelay}~${maxDelay}ms`)
+      const delays = expanded.map(f => f.delay)
+      console.log(`[GifEngine] lerp done: ${expanded.length} frames, delay ${Math.min(...delays)}~${Math.max(...delays)}ms`)
     })
   }
 
@@ -198,7 +118,7 @@ export class GifEngine {
       const alpha = aA * inv + aB * t
       d[i+3] = alpha
       if (alpha > 0) {
-        // premultiplied alpha 보간 — 투명 픽셀의 색상이 경계에 번지지 않음
+        // premultiplied alpha 보간 — 투명 픽셀 색상이 경계에 번지지 않음
         d[i]   = (dA[i]   * aA * inv + dB[i]   * aB * t) / alpha
         d[i+1] = (dA[i+1] * aA * inv + dB[i+1] * aB * t) / alpha
         d[i+2] = (dA[i+2] * aA * inv + dB[i+2] * aB * t) / alpha
@@ -216,19 +136,12 @@ export class GifEngine {
     this.rate = r
   }
 
-  /** GIF 내장 딜레이 무시하고 목표 fps 고정 */
-  setForceFps(fps: number): void {
-    this.forceMsPerFrame = 1000 / fps
-  }
+  setForceFps(fps: number): void { this.forceMsPerFrame = 1000 / fps }
 
   start(): void { if (this.frames.length) this.running = true }
   stop():  void { this.running = false }
 
-  drawTo(
-    ctx: CanvasRenderingContext2D,
-    dx: number, dy: number,
-    dw: number, dh: number
-  ): void {
+  drawTo(ctx: CanvasRenderingContext2D, dx: number, dy: number, dw: number, dh: number): void {
     const f = this.frames[this.idx]
     if (!f) return
     ctx.drawImage(f.bitmap, dx, dy, dw, dh)
@@ -237,42 +150,29 @@ export class GifEngine {
   // A랭크 첫 진입 시 호출 — glow mask를 그때 생성 (로딩 시간 / RAM 절약)
   async buildGlowMask(): Promise<void> {
     if (this.glowMask.length || !this.rawBuf) return
-    const gif = parseGIF(this.rawBuf)
-    const W = this.naturalWidth, H = this.naturalHeight
-    const rawGlow: ReturnType<typeof decompressFrame>[] = []
-    for (let i = 0; i < gif.frames.length; i++) {
-      rawGlow.push(decompressFrame(gif.frames[i], gif.gct, true))
-      if ((i & 7) === 7) await new Promise<void>(r => setTimeout(r, 0))
-    }
-    const hasTransparency = rawGlow.some(
-      f => (f as { transparentIndex?: number }).transparentIndex != null &&
-           (f as { transparentIndex?: number }).transparentIndex! >= 0
-    )
-    const oc  = new OffscreenCanvas(W, H)
-    const ctx = oc.getContext('2d', { willReadFrequently: true })!
+
     const bitmaps: ImageBitmap[] = []
-    for (const f of rawGlow) {
-      ctx.clearRect(0, 0, W, H)
-      const tmp = new OffscreenCanvas(f.dims.width, f.dims.height)
-      tmp.getContext('2d')!.putImageData(
-        new ImageData(new Uint8ClampedArray(f.patch), f.dims.width, f.dims.height), 0, 0
-      )
-      ctx.drawImage(tmp, f.dims.left, f.dims.top)
-      if (!hasTransparency) removeBackgroundFlood(ctx, W, H, 32, true)
-      bitmaps.push(await createImageBitmap(oc))
+    let resolveGlow!: () => void
+    const glowDone = new Promise<void>(r => { resolveGlow = r })
+
+    const worker = new Worker(new URL('./gif-worker.ts', import.meta.url), { type: 'module' })
+    worker.onmessage = ({ data: msg }) => {
+      if (msg.type === 'frame') bitmaps.push(msg.bitmap)
+      else if (msg.type === 'done') { worker.terminate(); resolveGlow() }
     }
+    worker.onerror = (e) => { console.error('[gif-worker glow]', e); worker.terminate(); resolveGlow() }
+
+    const workerBuf = this.rawBuf.slice(0)
+    worker.postMessage({ buf: workerBuf, forGlowMask: true }, [workerBuf])
+
+    await glowDone
     this.glowMask = bitmaps
-    this.rawBuf   = null  // 더 이상 불필요 — GC 허용
+    this.rawBuf   = null  // GC 허용
   }
 
-  // cat 실루엣 마스크로 그리기 — shadowBlur 글로우 전용
-  drawGlowTo(
-    ctx: CanvasRenderingContext2D,
-    dx: number, dy: number,
-    dw: number, dh: number
-  ): void {
+  drawGlowTo(ctx: CanvasRenderingContext2D, dx: number, dy: number, dw: number, dh: number): void {
     if (!this.glowMask.length) return
-    const ratio  = this.frames.length ? this.idx / this.frames.length : 0
+    const ratio   = this.frames.length ? this.idx / this.frames.length : 0
     const maskIdx = Math.floor(ratio * this.glowMask.length) % this.glowMask.length
     ctx.drawImage(this.glowMask[maskIdx], dx, dy, dw, dh)
   }
@@ -280,7 +180,6 @@ export class GifEngine {
   get isLoaded():   boolean { return this.frames.length > 0 }
   get frameCount(): number  { return this.frames.length }
 
-  /** renderLoop에서 draw 직전에 호출. dt = 실제 경과 ms */
   tick(dt: number): void {
     if (!this.running || this.rate <= 0 || !this.frames.length) return
     this.elapsed += dt * this.rate
