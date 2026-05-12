@@ -59,7 +59,8 @@ export class GifEngine {
   naturalHeight = 0
 
   private frames:    Frame[]       = []
-  private glowMask:  ImageBitmap[] = []  // cat 실루엣 마스크 (glow 전용, 16프레임)
+  private glowMask:  ImageBitmap[] = []  // lazy — buildGlowMask() 첫 호출 시 생성
+  private rawBuf:    ArrayBuffer | null = null  // glow mask lazy 생성용 원본 보관
   private idx        = 0
   private elapsed    = 0
   private rate       = 1.0
@@ -67,6 +68,7 @@ export class GifEngine {
   private forceMsPerFrame: number | null = null
 
   async load(buf: ArrayBuffer): Promise<void> {
+    this.rawBuf = buf  // glow mask lazy 생성을 위해 보관
     const gif = parseGIF(buf)
     const raw = decompressFrames(gif, true)
 
@@ -85,15 +87,9 @@ export class GifEngine {
     const ctx = oc.getContext('2d', { willReadFrequently: true })!
     ctx.clearRect(0, 0, W, H)
 
-    // glow 마스크용 캔버스 (항상 flood fill 적용 — 배경 밝기 무관)
-    const oc2  = new OffscreenCanvas(W, H)
-    const ctx2 = oc2.getContext('2d', { willReadFrequently: true })!
-    ctx2.clearRect(0, 0, W, H)
-
     let prevDisposal = 2
     let snapshot: ImageData | null = null
-    const bitmaps: Frame[]       = []
-    const glowBitmaps: ImageBitmap[] = []
+    const bitmaps: Frame[] = []
 
     for (const f of raw) {
       if (hasTransparency) {
@@ -105,7 +101,6 @@ export class GifEngine {
       } else {
         ctx.clearRect(0, 0, W, H)
       }
-      ctx2.clearRect(0, 0, W, H)
 
       if ((f.disposalType ?? 0) === 3) {
         snapshot = ctx.getImageData(0, 0, W, H)
@@ -118,26 +113,22 @@ export class GifEngine {
         0, 0
       )
       ctx.drawImage(tmp, f.dims.left, f.dims.top)
-      ctx2.drawImage(tmp, f.dims.left, f.dims.top)
 
       if (!hasTransparency) {
-        removeBackgroundFlood(ctx, W, H)   // 배경 밝으면 제거, 어두우면 유지
-        removeBackgroundFlood(ctx2, W, H, 32, true)  // 항상 제거 (glow 마스크)
+        removeBackgroundFlood(ctx, W, H)
       }
 
       bitmaps.push({
         bitmap: await createImageBitmap(oc),
         delay:  Math.max((f.delay ?? 10) * 10, 20)
       })
-      glowBitmaps.push(await createImageBitmap(oc2))
 
       prevDisposal = f.disposalType ?? 0
     }
 
-    this.frames   = await this.lerpExpand(bitmaps, W, H, 60)
-    this.glowMask = glowBitmaps   // 16프레임 — 메모리 절약, blur로 계단 안 보임
-    this.idx      = 0
-    this.elapsed  = 0
+    this.frames  = await this.lerpExpand(bitmaps, W, H, 24)  // 60→24fps: RAM 60% 절약
+    this.idx     = 0
+    this.elapsed = 0
 
     const delays = bitmaps.map(f => f.delay)
     const minDelay = Math.min(...delays)
@@ -219,6 +210,33 @@ export class GifEngine {
     const f = this.frames[this.idx]
     if (!f) return
     ctx.drawImage(f.bitmap, dx, dy, dw, dh)
+  }
+
+  // A랭크 첫 진입 시 호출 — glow mask를 그때 생성 (로딩 시간 / RAM 절약)
+  async buildGlowMask(): Promise<void> {
+    if (this.glowMask.length || !this.rawBuf) return
+    const gif = parseGIF(this.rawBuf)
+    const raw = decompressFrames(gif, true)
+    const W = this.naturalWidth, H = this.naturalHeight
+    const hasTransparency = raw.some(
+      f => (f as { transparentIndex?: number }).transparentIndex != null &&
+           (f as { transparentIndex?: number }).transparentIndex! >= 0
+    )
+    const oc  = new OffscreenCanvas(W, H)
+    const ctx = oc.getContext('2d', { willReadFrequently: true })!
+    const bitmaps: ImageBitmap[] = []
+    for (const f of raw) {
+      ctx.clearRect(0, 0, W, H)
+      const tmp = new OffscreenCanvas(f.dims.width, f.dims.height)
+      tmp.getContext('2d')!.putImageData(
+        new ImageData(new Uint8ClampedArray(f.patch), f.dims.width, f.dims.height), 0, 0
+      )
+      ctx.drawImage(tmp, f.dims.left, f.dims.top)
+      if (!hasTransparency) removeBackgroundFlood(ctx, W, H, 32, true)
+      bitmaps.push(await createImageBitmap(oc))
+    }
+    this.glowMask = bitmaps
+    this.rawBuf   = null  // 더 이상 불필요 — GC 허용
   }
 
   // cat 실루엣 마스크로 그리기 — shadowBlur 글로우 전용

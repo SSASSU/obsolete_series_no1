@@ -100,7 +100,7 @@ function makeCanvasRenderer(canvasId: string): {
 }
 
 // ── 밈 엔진 LRU 캐시 ─────────────────────────────────
-const MAX_CACHED_MEMES = 2
+const MAX_CACHED_MEMES = 1
 
 interface MemeEntry {
   engine:   GifEngine
@@ -245,11 +245,21 @@ function setRankText(el: HTMLElement, rank: string): void {
   }
 }
 
+const GLOW_RANKS = new Set(['A', 'S', 'SS', 'SSS'])
+let glowMaskBuilding = false
+
 function onComboUpdate(rank: string): void {
   if (!rankDisplay || !comboEl) return
   const prevIdx = RANK_ORDER.indexOf(currentRank)
   const nextIdx = RANK_ORDER.indexOf(rank)
   currentRank = rank
+
+  // A 랭크 첫 진입 시 glow mask 지연 빌드
+  if (GLOW_RANKS.has(rank) && !glowMaskBuilding) {
+    glowMaskBuilding = true
+    const entry = memeCache.get(activeMeme)
+    entry?.engine.buildGlowMask()
+  }
 
   document.body.dataset.rank = rank
   comboEl.className = `rank-${rank}`
