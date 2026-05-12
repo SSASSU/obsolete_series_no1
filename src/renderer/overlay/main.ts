@@ -94,6 +94,21 @@ function makeCanvasRenderer(canvasId: string): {
       engine.drawGlowTo(ctx, baseDx, baseDy, dw, dh)
       ctx.restore()
     }
+
+    // lerp 로딩 프로그레스 바
+    if (engine.lerpProgress < 1) {
+      const p    = engine.lerpProgress
+      const barH = 3
+      const barY = ch - barH
+      const fade = p > 0.85 ? (1 - p) / 0.15 : 1
+      ctx.globalAlpha = 0.25 * fade
+      ctx.fillStyle   = '#ffffff'
+      ctx.fillRect(0, barY, cw, barH)
+      ctx.globalAlpha = 0.9 * fade
+      ctx.fillStyle   = '#FF6600'
+      ctx.fillRect(0, barY, Math.max(cw * p, 6), barH)
+      ctx.globalAlpha = 1
+    }
   }
 
   return { canvas, ctx, resize, draw }

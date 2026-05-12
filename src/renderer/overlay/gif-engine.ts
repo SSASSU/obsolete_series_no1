@@ -65,6 +65,7 @@ export class GifEngine {
   private elapsed    = 0
   private rate       = 1.0
   running             = false
+  lerpProgress        = 1  // 0→1 during background lerp, 1 = done
   private forceMsPerFrame: number | null = null
 
   async load(buf: ArrayBuffer): Promise<void> {
@@ -126,24 +127,33 @@ export class GifEngine {
       prevDisposal = f.disposalType ?? 0
     }
 
-    this.frames  = await this.lerpExpand(bitmaps, W, H, 24)  // 60→24fps: RAM 60% 절약
-    this.idx     = 0
-    this.elapsed = 0
+    // 원본 프레임 즉시 표시 — 고양이 바로 등장
+    this.frames      = bitmaps
+    this.idx         = 0
+    this.elapsed     = 0
+    this.lerpProgress = 0
 
     const delays = bitmaps.map(f => f.delay)
-    const minDelay = Math.min(...delays)
-    const maxDelay = Math.max(...delays)
-    console.log(`[GifEngine] ${W}×${H}, ${bitmaps.length} frames → lerp ${this.frames.length}frames, hasTransparency=${hasTransparency}`)
-    console.log(`[GifEngine] delay range: ${minDelay}ms ~ ${maxDelay}ms (avg ${Math.round(delays.reduce((a,b)=>a+b,0)/delays.length)}ms)`)
+    console.log(`[GifEngine] ${W}×${H}, ${bitmaps.length} raw frames ready, lerp expanding in background`)
+
+    // lerp 확장은 백그라운드에서 — 완료 후 교체
+    this.lerpExpand(bitmaps, W, H, 24).then(expanded => {
+      const ratio   = this.frames.length > 0 ? this.idx / this.frames.length : 0
+      this.frames   = expanded
+      this.idx      = Math.min(Math.floor(ratio * expanded.length), expanded.length - 1)
+      this.lerpProgress = 1
+      const minDelay = Math.min(...delays)
+      const maxDelay = Math.max(...delays)
+      console.log(`[GifEngine] lerp done: ${expanded.length} frames, delay ${minDelay}~${maxDelay}ms`)
+    })
   }
 
   private async lerpExpand(src: Frame[], W: number, H: number, targetFps = 60): Promise<Frame[]> {
     const result: Frame[] = []
     const msPerFrame = 1000 / targetFps
-    // 느린 GIF (>100ms/frame) 는 100ms로 캡핑 → ~10fps 기준으로 lerp 생성
-    // 그렇지 않으면 500ms GIF가 8초 사이클로 느리게 보임
     const MAX_EFFECTIVE_DELAY = 100
     for (let i = 0; i < src.length; i++) {
+      this.lerpProgress = i / src.length
       const curr = src[i]
       const next = src[(i + 1) % src.length]
       const effectiveDelay = Math.min(curr.delay, MAX_EFFECTIVE_DELAY)
