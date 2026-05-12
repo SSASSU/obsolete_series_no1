@@ -95,8 +95,14 @@ function makeCanvasRenderer(canvasId: string): {
       ctx.restore()
     }
 
-    // lerp 로딩 프로그레스 바
-    if (engine.lerpProgress < 1) {
+    // 로딩 인디케이터
+    if (engine.loadPhase === 1) {
+      const pulse = 0.5 + 0.5 * Math.abs(Math.sin(timeAcc / 400))
+      ctx.globalAlpha = 0.75 * pulse
+      ctx.fillStyle   = '#FF6600'
+      ctx.fillRect(0, ch - 3, cw, 3)
+      ctx.globalAlpha = 1
+    } else if (engine.loadPhase === 2 && engine.lerpProgress < 1) {
       const p    = engine.lerpProgress
       const barH = 3
       const barY = ch - barH
@@ -151,18 +157,21 @@ async function loadMemeEngine(id: string): Promise<MemeEntry | null> {
 
   const renderer = makeCanvasRenderer(`${id}-canvas`)
   const gif = new GifEngine()
+  gif.loadPhase = 1  // pulsing bar from first frame
+  const entry: MemeEntry = { engine: gif, renderer }
+  memeCache.set(id, entry)
+  touchLRU(id)
+
   const buf = await new Promise<ArrayBuffer | null>(resolve => {
     window.electronAPI.onGifData((memeId, b) => { if (memeId === id) resolve(b) })
     window.electronAPI.getGif(id)
   })
 
   loadingSet.delete(id)
-  if (!buf) return null
+  if (!buf) { memeCache.delete(id); return null }
 
   await gif.load(buf)
-  const entry: MemeEntry = { engine: gif, renderer }
-  memeCache.set(id, entry)
-  touchLRU(id)
+  gif.start()
   return entry
 }
 
@@ -200,7 +209,7 @@ function showMeme(id: string): void {
   if (entry) {
     entry.engine.start()
   } else {
-    loadMemeEngine(id).then(e => { if (e && activeMeme === id) e.engine.start() })
+    loadMemeEngine(id)
   }
 }
 

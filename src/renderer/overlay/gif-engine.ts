@@ -66,9 +66,11 @@ export class GifEngine {
   private rate       = 1.0
   running             = false
   lerpProgress        = 1  // 0→1 during background lerp, 1 = done
+  loadPhase           = 0  // 0=idle, 1=loading frames, 2=lerp expanding
   private forceMsPerFrame: number | null = null
 
   async load(buf: ArrayBuffer): Promise<void> {
+    this.loadPhase = 1
     this.rawBuf = buf  // glow mask lazy 생성을 위해 보관
     const gif = parseGIF(buf)
     const raw = decompressFrames(gif, true)
@@ -131,6 +133,7 @@ export class GifEngine {
     this.frames      = bitmaps
     this.idx         = 0
     this.elapsed     = 0
+    this.loadPhase   = 2
     this.lerpProgress = 0
 
     const delays = bitmaps.map(f => f.delay)
@@ -142,6 +145,7 @@ export class GifEngine {
       this.frames   = expanded
       this.idx      = Math.min(Math.floor(ratio * expanded.length), expanded.length - 1)
       this.lerpProgress = 1
+      this.loadPhase    = 0
       const minDelay = Math.min(...delays)
       const maxDelay = Math.max(...delays)
       console.log(`[GifEngine] lerp done: ${expanded.length} frames, delay ${minDelay}~${maxDelay}ms`)
