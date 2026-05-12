@@ -1,4 +1,4 @@
-import { parseGIF, decompressFrames } from 'gifuct-js'
+import { parseGIF, decompressFrame } from 'gifuct-js'
 
 // 4 모서리에서 flood fill — 배경과 연결된 픽셀만 제거해 객체 경계 보존
 // forceRemove=true: 배경이 어두워도 강제 제거 (glow 마스크 전용)
@@ -72,11 +72,19 @@ export class GifEngine {
   async load(buf: ArrayBuffer): Promise<void> {
     this.loadPhase = 1
     this.rawBuf = buf  // glow mask lazy 생성을 위해 보관
-    const gif = parseGIF(buf)
-    const raw = decompressFrames(gif, true)
 
+    await new Promise<void>(r => setTimeout(r, 0))  // yield — 렌더 루프가 펄스 바 그릴 기회
+
+    const gif = parseGIF(buf)
     this.naturalWidth  = gif.lsd.width
     this.naturalHeight = gif.lsd.height
+
+    // 한 번에 모든 프레임 압축 해제하면 10초간 스레드 블로킹 → 프레임마다 yield
+    const raw: ReturnType<typeof decompressFrame>[] = []
+    for (let i = 0; i < gif.frames.length; i++) {
+      raw.push(decompressFrame(gif.frames[i], gif.gct, true))
+      if ((i & 7) === 7) await new Promise<void>(r => setTimeout(r, 0))
+    }
 
     const W = this.naturalWidth
     const H = this.naturalHeight
@@ -230,16 +238,20 @@ export class GifEngine {
   async buildGlowMask(): Promise<void> {
     if (this.glowMask.length || !this.rawBuf) return
     const gif = parseGIF(this.rawBuf)
-    const raw = decompressFrames(gif, true)
     const W = this.naturalWidth, H = this.naturalHeight
-    const hasTransparency = raw.some(
+    const rawGlow: ReturnType<typeof decompressFrame>[] = []
+    for (let i = 0; i < gif.frames.length; i++) {
+      rawGlow.push(decompressFrame(gif.frames[i], gif.gct, true))
+      if ((i & 7) === 7) await new Promise<void>(r => setTimeout(r, 0))
+    }
+    const hasTransparency = rawGlow.some(
       f => (f as { transparentIndex?: number }).transparentIndex != null &&
            (f as { transparentIndex?: number }).transparentIndex! >= 0
     )
     const oc  = new OffscreenCanvas(W, H)
     const ctx = oc.getContext('2d', { willReadFrequently: true })!
     const bitmaps: ImageBitmap[] = []
-    for (const f of raw) {
+    for (const f of rawGlow) {
       ctx.clearRect(0, 0, W, H)
       const tmp = new OffscreenCanvas(f.dims.width, f.dims.height)
       tmp.getContext('2d')!.putImageData(
