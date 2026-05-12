@@ -1,4 +1,4 @@
-import { app, ipcMain, session, protocol } from 'electron'
+import { app, ipcMain, session, protocol, globalShortcut } from 'electron'
 
 // EPIPE: broken pipe — 터미널 파이프 끊길 때 dev 모드에서 튀는 에러 억제
 process.on('uncaughtException', (err: NodeJS.ErrnoException) => {
@@ -78,6 +78,25 @@ app.whenReady().then(async () => {
     }
   })
 
+  function registerHotkey(accelerator: string): void {
+    globalShortcut.unregisterAll()
+    if (!accelerator) return
+    try {
+      const ok = globalShortcut.register(accelerator, () => {
+        const next = !store.get('enabled')
+        store.set('enabled', next)
+        setVisible(next)
+        refreshMenu()
+      })
+      if (!ok) console.error('[hotkey] 등록 실패 (이미 사용 중):', accelerator)
+      else console.log('[hotkey] 등록됨:', accelerator)
+    } catch (e) {
+      console.error('[hotkey] 등록 오류:', e)
+    }
+  }
+
+  registerHotkey(store.get('hotkey') ?? '')
+
   ipcMain.on('set-setting', (_e, key: string, value: unknown) => {
     store.set(key as never, value as never)
     if (key === 'autoStart') app.setLoginItemSettings({ openAtLogin: value as boolean })
@@ -85,6 +104,7 @@ app.whenReady().then(async () => {
     if (key === 'position' || key === 'size') updatePosition()
     if (key === 'memeId') sendMemeConfig()
     if (key === 'opacity') getOverlayWindow()?.setOpacity(value as number)
+    if (key === 'hotkey') registerHotkey(value as string)
   })
 
   ipcMain.removeHandler('get-settings')
@@ -136,4 +156,4 @@ app.whenReady().then(async () => {
   app.setLoginItemSettings({ openAtLogin: store.get('autoStart') })
 })
 
-app.on('before-quit', () => stopKeyboardHook())
+app.on('before-quit', () => { stopKeyboardHook(); globalShortcut.unregisterAll() })

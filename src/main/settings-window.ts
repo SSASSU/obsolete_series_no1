@@ -10,8 +10,8 @@ export function createSettingsWindow(): void {
   }
 
   win = new BrowserWindow({
-    width: 380,
-    height: 520,
+    width: 360,
+    height: 580,
     resizable: false,
     frame: false,
     transparent: false,

@@ -7,6 +7,7 @@ interface Settings {
   opacity: number
   autoStart: boolean
   enabled: boolean
+  hotkey: string
 }
 
 export const store = new Store<Settings>({
@@ -16,6 +17,7 @@ export const store = new Store<Settings>({
     size: 96,
     opacity: 0.9,
     autoStart: false,
-    enabled: true
+    enabled: true,
+    hotkey: ''
   }
 })

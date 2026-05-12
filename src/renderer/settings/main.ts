@@ -1,11 +1,38 @@
 interface API {
   getSettings: () => Promise<Record<string, unknown>>
-  getMemes: () => Promise<{ id: string; name: string }[]>
-  setSetting: (key: string, value: unknown) => void
+  getMemes:    () => Promise<{ id: string; name: string }[]>
+  setSetting:  (key: string, value: unknown) => void
   closeWindow: () => void
 }
 declare const window: Window & { electronAPI: API }
 
+// ── Hotkey capture ────────────────────────────
+const KEY_MAP: Record<string, string> = {
+  ' ':           'Space',
+  'ArrowUp':     'Up',
+  'ArrowDown':   'Down',
+  'ArrowLeft':   'Left',
+  'ArrowRight':  'Right',
+}
+const MODIFIERS = new Set(['Control', 'Alt', 'Shift', 'Meta'])
+
+function keyToAccelerator(e: KeyboardEvent): string | null {
+  if (MODIFIERS.has(e.key)) return null
+  const parts: string[] = []
+  if (e.ctrlKey)  parts.push('Ctrl')
+  if (e.altKey)   parts.push('Alt')
+  if (e.shiftKey) parts.push('Shift')
+  if (e.metaKey)  parts.push('Super')
+  const key = KEY_MAP[e.key] ?? (e.key.length === 1 ? e.key.toUpperCase() : e.key)
+  parts.push(key)
+  return parts.join('+')
+}
+
+function formatHotkey(acc: string): string {
+  return acc || '없음'
+}
+
+// ── Init ──────────────────────────────────────
 async function init(): Promise<void> {
   const [settings, memes] = await Promise.all([
     window.electronAPI.getSettings(),
@@ -51,24 +78,68 @@ async function init(): Promise<void> {
 
   // 크기 슬라이더
   const sizeRange = document.getElementById('size-range') as HTMLInputElement
-  const sizeVal = document.getElementById('size-val') as HTMLSpanElement
-  sizeRange.value = String(settings['size'])
-  sizeVal.textContent = String(settings['size'])
+  const sizeVal   = document.getElementById('size-val')   as HTMLSpanElement
+  sizeRange.value    = String(settings['size'])
+  sizeVal.textContent = `${settings['size']}px`
   sizeRange.addEventListener('input', () => {
-    sizeVal.textContent = sizeRange.value
+    sizeVal.textContent = `${sizeRange.value}px`
     window.electronAPI.setSetting('size', Number(sizeRange.value))
   })
 
   // 투명도 슬라이더
   const opacityRange = document.getElementById('opacity-range') as HTMLInputElement
-  const opacityVal = document.getElementById('opacity-val') as HTMLSpanElement
+  const opacityVal   = document.getElementById('opacity-val')   as HTMLSpanElement
   const pct = Math.round((settings['opacity'] as number) * 100)
-  opacityRange.value = String(pct)
-  opacityVal.textContent = String(pct)
+  opacityRange.value    = String(pct)
+  opacityVal.textContent = `${pct}%`
   opacityRange.addEventListener('input', () => {
-    opacityVal.textContent = opacityRange.value
+    opacityVal.textContent = `${opacityRange.value}%`
     window.electronAPI.setSetting('opacity', Number(opacityRange.value) / 100)
   })
+
+  // 단축키
+  const hotkeyBtn   = document.getElementById('hotkey-btn')   as HTMLButtonElement
+  const hotkeyClear = document.getElementById('hotkey-clear') as HTMLButtonElement
+  let currentHotkey = (settings['hotkey'] as string) ?? ''
+  let capturing     = false
+
+  hotkeyBtn.textContent = formatHotkey(currentHotkey)
+
+  hotkeyBtn.addEventListener('click', () => {
+    capturing = true
+    hotkeyBtn.textContent = '...'
+    hotkeyBtn.classList.add('capturing')
+  })
+
+  hotkeyClear.addEventListener('click', () => {
+    capturing = false
+    currentHotkey = ''
+    hotkeyBtn.textContent = formatHotkey('')
+    hotkeyBtn.classList.remove('capturing')
+    window.electronAPI.setSetting('hotkey', '')
+  })
+
+  window.addEventListener('keydown', (e) => {
+    if (!capturing) return
+    e.preventDefault()
+    e.stopPropagation()
+
+    if (e.key === 'Escape') {
+      capturing = false
+      hotkeyBtn.textContent = formatHotkey(currentHotkey)
+      hotkeyBtn.classList.remove('capturing')
+      return
+    }
+
+    const acc = keyToAccelerator(e)
+    if (!acc) return  // modifier-only: wait for actual key
+
+    capturing = false
+    currentHotkey = acc
+    hotkeyBtn.textContent = formatHotkey(acc)
+    hotkeyBtn.classList.remove('capturing')
+    window.electronAPI.setSetting('hotkey', acc)
+  }, true)
 
   // 닫기
   document.getElementById('close-btn')!.addEventListener('click', () => {
