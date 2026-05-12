@@ -1,0 +1,41 @@
+appId: com.obsolete-series.no1
+productName: obsolete_series_no1
+directories:
+  buildResources: resources
+  output: dist-electron
+
+extraMetadata:
+  main: dist/main/index.js
+
+files:
+  - dist/**/*
+  - '!dist/renderer/characters/**'
+  - assets/*.gif
+  - '!src/**/*'
+  - '!electron.vite.config.*'
+
+win:
+  icon: resources/icon.ico
+  target:
+    - target: msi
+      arch: x64
+    - target: portable
+      arch: x64
+
+msi:
+  perMachine: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  runAfterFinish: true
+
+mac:
+  icon: resources/icon.icns
+  target:
+    - target: dmg
+      arch:
+        - x64
+        - arm64
+
+publish:
+  provider: github
+  releaseType: release

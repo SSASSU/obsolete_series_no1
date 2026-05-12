@@ -1,0 +1,23 @@
+node_modules/
+dist/
+dist-electron/
+*.log
+.env
+
+# 내부 개발 도구
+.bkit/
+.claude/
+docs/
+
+# 프로토타입 (별도 관리)
+godot-prototype/
+
+# 임시 스크린샷/테스트 이미지
+image.png
+log.png
+prob.png
+sample.png
+
+# IDE
+.vscode/
+.idea/

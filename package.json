@@ -1,0 +1,32 @@
+{
+  "name": "obsolete-series-no1",
+  "version": "0.2.0",
+  "description": "타이핑하면 밈이 반응하는 데스크탑 펫",
+  "main": "dist/main/index.js",
+  "author": "obsolete-series",
+  "license": "MIT",
+  "private": true,
+  "scripts": {
+    "dev": "electron-vite dev",
+    "import": "tsx scripts/import-gif.ts",
+    "build": "electron-vite build",
+    "dist:win": "npm run build && electron-builder --win",
+    "dist:mac": "npm run build && electron-builder --mac",
+    "postinstall": "electron-rebuild -f -w uiohook-napi"
+  },
+  "dependencies": {
+    "electron-store": "^7.0.3",
+    "gifuct-js": "^2.1.2",
+    "pngjs": "^7.0.0",
+    "uiohook-napi": "1.5.4"
+  },
+  "devDependencies": {
+    "@electron/rebuild": "^3.6.0",
+    "@types/pngjs": "^6.0.5",
+    "electron": "^31.0.0",
+    "electron-builder": "^24.13.3",
+    "electron-vite": "^2.3.0",
+    "tsx": "^4.21.0",
+    "typescript": "^5.4.5"
+  }
+}

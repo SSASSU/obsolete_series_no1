@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' meme:; img-src 'self' file: data: meme:; connect-src 'self' file: meme:">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { background: transparent; overflow: hidden; width: 100%; height: 100%; }
+    .scene { display: none; width: 100%; height: 100%; align-items: center; justify-content: center; }
+    .scene.active { display: flex; }
+
+    /* 씬 CSS 흔들림 없음 — SS 이상 진동은 JS 캔버스 draw에서 처리 */
+
+    /* ── Oiia Cat ── */
+    #oiia-cat-canvas {
+      width: 100%;
+      height: 100%;
+    }
+
+    /* ── Nyan Cat ── */
+    #scene-nyan {
+      overflow: hidden;
+      align-items: stretch;
+    }
+    #nyan-cat-canvas {
+      width: 100%;
+      height: 100%;
+      image-rendering: pixelated;
+    }
+
+    /* ── 콤보 랭크 디스플레이 ── */
+    #combo-display {
+      position: fixed;
+      bottom: 3px;
+      right: 5px;
+      text-align: right;
+      pointer-events: none;
+      z-index: 99;
+      line-height: 1;
+    }
+    #rank-label {
+      font: bold 11px/1 monospace;
+      display: block;
+      color: rgba(255,255,255,0.18);
+    }
+    #wpm-label {
+      font: bold 9px/1.4 monospace;
+      color: rgba(255,255,255,0.45);
+      text-shadow: 0 0 3px rgba(0,0,0,0.9);
+      display: block;
+    }
+
+    /* C — 보임 */
+    .rank-C #rank-label { font-size: 14px; color: rgba(255,255,255,0.8); text-shadow: 0 1px 4px #000c; }
+    /* B — 파란 느린 글로우 펄스 */
+    .rank-B #rank-label { font-size: 17px; color: #5cf; text-shadow: 0 0 8px #5cfa; animation: rankGlow 1.0s ease-in-out infinite; }
+    /* A — 금색, 빠른 바운스 — 여기서부터 급발진 */
+    .rank-A #rank-label { font-size: 24px; color: #fd0; text-shadow: 0 0 18px #fd0c; animation: rankBounce 0.06s ease-in-out infinite; }
+    /* S — 무지개 웨이브 시작, 확실히 다름 */
+    .rank-S #rank-label   { font-size: 28px; filter: drop-shadow(0 0 7px rgba(255,255,255,0.7)); }
+    /* SS — 더 크고 훨씬 빠름 + 진동 */
+    .rank-SS #rank-label  { font-size: 34px; filter: drop-shadow(0 0 12px rgba(255,200,80,0.9)); animation: rankVibe 0.032s ease-in-out infinite; }
+    /* SSS — 완전 발광 + 쉐이크 */
+    .rank-SSS #rank-label { font-size: 42px; filter: drop-shadow(0 0 20px #fff) drop-shadow(0 0 35px #f5f); animation: rankShake 0.018s ease-in-out infinite; }
+
+    /* B 글로우 펄스 */
+    @keyframes rankGlow {
+      0%, 100% { filter: brightness(0.85); }
+      50%       { filter: brightness(1.4) drop-shadow(0 0 10px #5cff); }
+    }
+    /* A 바운스 — 충분히 빠르고 커야 함 */
+    @keyframes rankBounce {
+      0%, 100% { transform: scale(1); }
+      50%       { transform: scale(1.38); }
+    }
+    /* SS 진동 */
+    @keyframes rankVibe {
+      0%, 100% { transform: scale(1) translateY(0); }
+      50%       { transform: scale(1.12) translateY(-4px); }
+    }
+    /* SSS 쉐이크 — 제어불능 */
+    @keyframes rankShake {
+      0%   { transform: scale(1)    translateX(0)   translateY(0); }
+      25%  { transform: scale(1.14) translateX(-4px) translateY(-3px); }
+      50%  { transform: scale(1)    translateX(4px)  translateY(3px); }
+      75%  { transform: scale(1.14) translateX(-3px) translateY(-4px); }
+      100% { transform: scale(1)    translateX(0)   translateY(0); }
+    }
+
+    /* S 웨이브 */
+    .rank-S #rank-label span {
+      display: inline-block;
+      animation: charwaveS 0.055s ease-in-out infinite, charbow 0.13s linear infinite;
+    }
+    /* SS 웨이브 */
+    .rank-SS #rank-label span {
+      display: inline-block;
+      animation: charwaveSS 0.032s ease-in-out infinite, charbow 0.06s linear infinite;
+    }
+    /* SSS 웨이브 */
+    .rank-SSS #rank-label span {
+      display: inline-block;
+      animation: charwaveSSS 0.018s ease-in-out infinite, charbow 0.03s linear infinite;
+    }
+
+    @keyframes charwaveS {
+      0%, 100% { transform: translateY(0); }
+      50%       { transform: translateY(-17px); }
+    }
+    @keyframes charwaveSS {
+      0%, 100% { transform: translateY(0) scale(1); }
+      50%       { transform: translateY(-24px) scale(1.22); }
+    }
+    @keyframes charwaveSSS {
+      0%   { transform: translateY(0)    rotate(-14deg) scale(1); }
+      50%  { transform: translateY(-34px) rotate(14deg)  scale(1.32); }
+      100% { transform: translateY(0)    rotate(-14deg) scale(1); }
+    }
+    @keyframes charbow {
+      0%     { color: #f55; }
+      16.67% { color: #fa5; }
+      33.33% { color: #ff5; }
+      50%    { color: #5f5; }
+      66.67% { color: #55f; }
+      83.33% { color: #d5f; }
+      100%   { color: #f55; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- ── Oiia Cat 씬 ── -->
+  <div id="scene-oiia" class="scene">
+    <canvas id="oiia-cat-canvas"></canvas>
+  </div>
+
+  <!-- ── Nyan Cat 씬 ── -->
+  <div id="scene-nyan" class="scene">
+    <canvas id="nyan-cat-canvas"></canvas>
+  </div>
+
+  <!-- ── 콤보 랭크 오버레이 ── -->
+  <div id="combo-display" class="rank-D">
+    <span id="rank-label">D</span>
+    <span id="wpm-label">0 WPM</span>
+  </div>
+
+<script type="module" src="./main.ts"></script>
+</body>
+</html>
