@@ -243,13 +243,14 @@ function showMeme(id: string): void {
 let currentRate  = 0
 let targetRate   = 0
 let currentState = 'idle'
+let _lastTpm     = 0
 
 let _lastTs  = 0
 let _logTick = 0
 function renderLoop(ts: number): void {
   const dt = _lastTs > 0 ? Math.min(ts - _lastTs, 100) : 0
   _lastTs   = ts
-  const lerpK = targetRate > currentRate ? 0.45 : 0.12
+  const lerpK = targetRate > currentRate ? 0.55 : 0.08
   currentRate += (targetRate - currentRate) * lerpK
 
   const entry = memeCache.get(activeMeme)
@@ -263,6 +264,8 @@ function renderLoop(ts: number): void {
     }
   }
 
+  updateParticles()
+
   if (++_logTick % 60 === 0) {
     console.log(`[render] rate=${currentRate.toFixed(2)} meme=${activeMeme} frames=${entry?.engine.frameCount} cached=${memeCache.size}`)
   }
@@ -274,12 +277,110 @@ const wpmDisplay    = document.getElementById('wpm-label')
 const rankDisplay   = document.getElementById('rank-label')
 const comboEl       = document.getElementById('combo-display')
 const cssLoadingEl  = document.getElementById('css-loading')
+const tpmBarFill    = document.getElementById('tpm-bar-fill') as HTMLElement | null
+const tpmBarNum     = document.getElementById('tpm-bar-num')  as HTMLElement | null
+const particleCanvas = document.getElementById('particle-canvas') as HTMLCanvasElement | null
+const pCtx          = particleCanvas?.getContext('2d') ?? null
+
+if (particleCanvas) {
+  const resize = () => { particleCanvas.width = window.innerWidth; particleCanvas.height = window.innerHeight }
+  resize(); window.addEventListener('resize', resize)
+}
+
+// ── 파티클 시스템 ────────────────────────────────────
+interface Particle { x: number; y: number; vx: number; vy: number; w: number; h: number; color: string; alpha: number; life: number; maxLife: number; angle: number }
+const particles: Particle[] = []
+const BAR_MAX_TPM = 200
+
+function spawnGravel(count: number): void {
+  const barX = 7
+  const barH = (particleCanvas?.height ?? window.innerHeight) * 0.9
+  const fillRatio = Math.min((_lastTpm / BAR_MAX_TPM), 1)
+  const spawnY = (particleCanvas?.height ?? window.innerHeight) - 10 - barH * fillRatio
+  const colors = ['#888', '#aaa', '#999', '#FF6600', '#cc4400', '#ff8844']
+  for (let i = 0; i < count; i++) {
+    const angle = -Math.PI / 2 + (Math.random() - 0.5) * Math.PI * 1.4
+    const speed = 1.5 + Math.random() * 5
+    particles.push({
+      x: barX + (Math.random() - 0.5) * 8,
+      y: spawnY,
+      vx: Math.cos(angle) * speed,
+      vy: Math.sin(angle) * speed,
+      w: 2 + Math.random() * 4,
+      h: 1 + Math.random() * 3,
+      color: colors[Math.floor(Math.random() * colors.length)],
+      alpha: 1, life: 0,
+      maxLife: 25 + Math.random() * 25,
+      angle: Math.random() * Math.PI * 2,
+    })
+  }
+}
+
+function updateParticles(): void {
+  if (!pCtx || !particleCanvas) return
+  pCtx.clearRect(0, 0, particleCanvas.width, particleCanvas.height)
+  for (let i = particles.length - 1; i >= 0; i--) {
+    const p = particles[i]
+    p.x += p.vx; p.y += p.vy
+    p.vy += 0.3; p.vx *= 0.97
+    p.life++; p.alpha = 1 - p.life / p.maxLife
+    p.angle += 0.12
+    if (p.alpha <= 0) { particles.splice(i, 1); continue }
+    pCtx.save()
+    pCtx.globalAlpha = p.alpha
+    pCtx.fillStyle = p.color
+    pCtx.translate(p.x, p.y)
+    pCtx.rotate(p.angle)
+    pCtx.fillRect(-p.w / 2, -p.h / 2, p.w, p.h)
+    pCtx.restore()
+  }
+}
 const RANK_ORDER  = ['D', 'C', 'B', 'A', 'S', 'SS', 'SSS']
 let   currentRank = 'D'
+
+const RANK_COLOR: Record<string, string> = {
+  'D':   '#336655',
+  'C':   '#aaccaa',
+  'B':   '#5cf',
+  'A':   '#fd0',
+  'S':   '#fff',
+  'SS':  'rgba(255,200,80,1)',
+  'SSS': '',
+}
+
+function applyRankColor(rank: string): void {
+  const isSSS = rank === 'SSS'
+  tpmBarFill?.classList.toggle('rainbow', isSSS)
+  tpmBarNum?.classList.toggle('rainbow',  isSSS)
+  if (!isSSS) {
+    const c = RANK_COLOR[rank] ?? '#336655'
+    if (tpmBarFill) tpmBarFill.style.backgroundColor = c
+    if (tpmBarNum)  tpmBarNum.style.color = c
+  }
+}
 
 function onWpmUpdate(wpm: number): void {
   if (wpmDisplay) wpmDisplay.textContent = `${wpm} TPM`
   targetRate = 0.5 + Math.pow(wpm / 40, 2)
+
+  if (tpmBarFill) {
+    tpmBarFill.style.width = `${Math.min(wpm / BAR_MAX_TPM * 100, 100)}%`
+  }
+
+  if (tpmBarNum && wpm !== _lastTpm) {
+    tpmBarNum.textContent = `${wpm} TPM`
+  }
+
+  // 매 틱마다 현재 랭크 색상 동기화 — SSS 탈출 시 즉시 반영
+  applyRankColor(currentRank)
+
+  // 자갈 파티클: 100 돌파 시 큰 폭발, 이후 고속 타이핑 지속 시 소량 지속
+  if (wpm >= 100) {
+    if (_lastTpm < 100) spawnGravel(22)
+    else if (wpm > _lastTpm + 15) spawnGravel(6)
+  }
+
+  _lastTpm = wpm
 }
 
 function onStateChange(state: string, _speed: number): void {
@@ -317,6 +418,7 @@ function onComboUpdate(rank: string): void {
 
   document.body.dataset.rank = rank
   comboEl.className = `rank-${rank}`
+  applyRankColor(rank)
   setRankText(rankDisplay, rank)
 
   if (nextIdx > prevIdx) {

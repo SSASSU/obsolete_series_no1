@@ -4,7 +4,7 @@
 // - 200ms마다 콜백 호출
 
 const WINDOW_MS = 10_000
-const TICK_MS   = 200
+const TICK_MS   = 50
 
 let keyTimestamps: number[] = []
 let pressedKeys   = new Set<number>()
