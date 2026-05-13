@@ -145,13 +145,15 @@ app.whenReady().then(async () => {
 
   let dailyMaxTpm = 0
 
-  startKeyboardHook((wpm) => {
+  // setImmediate: 윈도우가 먼저 페인트될 기회를 준 뒤 keyboard hook 시작
+  // uiohook.start()가 메인 스레드를 일시 블록하기 때문에 필요
+  setImmediate(() => startKeyboardHook((wpm) => {
     if (store.get('enabled')) sendSpeed(wpm)
     stateMachine.update(wpm)
     comboRank.update(wpm)
     if (wpm > dailyMaxTpm) dailyMaxTpm = wpm
     updateTrayTooltip(wpm, dailyMaxTpm)
-  })
+  }))
 
   app.setLoginItemSettings({ openAtLogin: store.get('autoStart') })
 })

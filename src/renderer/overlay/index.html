@@ -125,6 +125,42 @@
       83.33% { color: #d5f; }
       100%   { color: #f55; }
     }
+
+    /* ── CSS 로딩 인디케이터 (JS 없이 즉시 표시) ── */
+    #css-loading {
+      position: fixed;
+      bottom: 0; left: 0; right: 0;
+      pointer-events: none;
+      z-index: 100;
+      animation: cssLoadPulse 0.8s ease-in-out infinite alternate;
+    }
+    #css-loading.hidden { display: none; }
+    #css-loading-bar {
+      height: 3px;
+      background: #FF6600;
+    }
+    #css-loading-text {
+      display: block;
+      text-align: center;
+      font: 11px monospace;
+      color: #FF6600;
+      margin-bottom: 6px;
+    }
+    #css-loading-text::after {
+      content: '.....';
+      overflow: hidden;
+      display: inline-block;
+      vertical-align: bottom;
+      width: 0;
+      animation: cssLoadDots 1.4s steps(6, end) infinite;
+    }
+    @keyframes cssLoadPulse {
+      from { opacity: 0.35; }
+      to   { opacity: 0.85; }
+    }
+    @keyframes cssLoadDots {
+      to { width: 2.8em; }
+    }
   </style>
 </head>
 <body>
@@ -137,6 +173,12 @@
   <!-- ── Nyan Cat 씬 ── -->
   <div id="scene-nyan" class="scene">
     <canvas id="nyan-cat-canvas"></canvas>
+  </div>
+
+  <!-- ── CSS 로딩 인디케이터 (JS 이전에 즉시 표시) ── -->
+  <div id="css-loading">
+    <span id="css-loading-text">loading</span>
+    <div id="css-loading-bar"></div>
   </div>
 
   <!-- ── 콤보 랭크 오버레이 ── -->

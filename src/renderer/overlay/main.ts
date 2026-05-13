@@ -44,10 +44,17 @@ function makeCanvasRenderer(canvasId: string): {
     if (!engine.naturalWidth || !engine.naturalHeight) {
       if (engine.loadPhase === 1) {
         const pulse = 0.5 + 0.5 * Math.abs(Math.sin(timeAcc / 400))
-        ctx.globalAlpha = 0.75 * pulse
-        ctx.fillStyle   = '#FF6600'
+        const dots  = '.'.repeat(1 + (Math.floor(timeAcc / 350) % 5))
+        ctx.globalAlpha  = 0.75 * pulse
+        ctx.fillStyle    = '#FF6600'
         ctx.fillRect(0, ch - 3, cw, 3)
-        ctx.globalAlpha = 1
+        ctx.font         = '11px monospace'
+        ctx.textAlign    = 'center'
+        ctx.textBaseline = 'bottom'
+        ctx.fillText(`loading${dots}`, cw / 2, ch - 6)
+        ctx.globalAlpha  = 1
+        ctx.textAlign    = 'left'
+        ctx.textBaseline = 'alphabetic'
       }
       return
     }
@@ -119,13 +126,20 @@ function makeCanvasRenderer(canvasId: string): {
       const barH = 3
       const barY = ch - barH
       const fade = p > 0.85 ? (1 - p) / 0.15 : 1
+      const dots = '.'.repeat(1 + (Math.floor(timeAcc / 350) % 5))
       ctx.globalAlpha = 0.25 * fade
       ctx.fillStyle   = '#ffffff'
       ctx.fillRect(0, barY, cw, barH)
       ctx.globalAlpha = 0.9 * fade
       ctx.fillStyle   = '#FF6600'
       ctx.fillRect(0, barY, Math.max(cw * p, 6), barH)
-      ctx.globalAlpha = 1
+      ctx.font         = '11px monospace'
+      ctx.textAlign    = 'center'
+      ctx.textBaseline = 'bottom'
+      ctx.fillText(`loading${dots}`, cw / 2, ch - 6)
+      ctx.globalAlpha  = 1
+      ctx.textAlign    = 'left'
+      ctx.textBaseline = 'alphabetic'
     }
   }
 
@@ -244,6 +258,9 @@ function renderLoop(ts: number): void {
     const r = activeMeme === 'nyan-cat' ? Math.max(1.0, currentRate) : currentRate
     entry.engine.setRate(r)
     entry.renderer.draw(entry.engine, dt, currentRate, currentRank)
+    if (cssLoadingEl && entry.engine.isLoaded && !cssLoadingEl.classList.contains('hidden')) {
+      cssLoadingEl.classList.add('hidden')
+    }
   }
 
   if (++_logTick % 60 === 0) {
@@ -253,9 +270,10 @@ function renderLoop(ts: number): void {
 }
 
 // ── WPM / 상태 / 콤보 랭크 수신 ─────────────────────────
-const wpmDisplay  = document.getElementById('wpm-label')
-const rankDisplay = document.getElementById('rank-label')
-const comboEl     = document.getElementById('combo-display')
+const wpmDisplay    = document.getElementById('wpm-label')
+const rankDisplay   = document.getElementById('rank-label')
+const comboEl       = document.getElementById('combo-display')
+const cssLoadingEl  = document.getElementById('css-loading')
 const RANK_ORDER  = ['D', 'C', 'B', 'A', 'S', 'SS', 'SSS']
 let   currentRank = 'D'
 

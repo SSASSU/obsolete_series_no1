@@ -7,15 +7,15 @@ export class GifEngine {
   naturalWidth  = 0
   naturalHeight = 0
 
-  private frames:    Frame[]       = []
-  private glowMask:  ImageBitmap[] = []  // lazy — buildGlowMask() 첫 호출 시 생성
-  private rawBuf:    ArrayBuffer | null = null
-  private idx        = 0
-  private elapsed    = 0
-  private rate       = 1.0
-  running             = false
-  lerpProgress        = 1
-  loadPhase           = 0  // 0=idle, 1=loading, 2=lerp
+  private frames:   Frame[]       = []
+  private glowMask: ImageBitmap[] = []
+  private rawBuf:   ArrayBuffer | null = null
+  private idx       = 0
+  private elapsed   = 0
+  private rate      = 1.0
+  running            = false
+  lerpProgress       = 1
+  loadPhase          = 0  // 0=idle, 1=loading, 2=lerp
   private forceMsPerFrame: number | null = null
 
   async load(buf: ArrayBuffer): Promise<void> {
@@ -25,20 +25,20 @@ export class GifEngine {
     await new Promise<void>(r => setTimeout(r, 0))  // yield — 펄스 바 첫 그리기 기회
 
     let frameCount = 0
-    let resolveLoad!: () => void
-    const loadDone = new Promise<void>(r => { resolveLoad = r })
-
-    // GIF 디코딩을 별도 Worker 스레드에서 실행 — 메인 스레드 블로킹 없음
     const worker = new Worker(new URL('./gif-worker.ts', import.meta.url), { type: 'module' })
 
     worker.onmessage = ({ data: msg }) => {
+      if (msg.type === 'error') {
+        console.error('[GifEngine] worker error:', msg.message)
+        worker.terminate()
+        return
+      }
       if (msg.type === 'meta') {
         this.naturalWidth  = msg.W
         this.naturalHeight = msg.H
         frameCount         = msg.frameCount
       } else if (msg.type === 'frame') {
         this.frames.push({ bitmap: msg.bitmap, delay: msg.delay })
-        // 첫 프레임 도착 — 즉시 재생 시작, 진행 바로 전환
         if (this.frames.length === 1) {
           this.idx       = 0
           this.elapsed   = 0
@@ -48,86 +48,20 @@ export class GifEngine {
         this.lerpProgress = (msg.index + 1) / Math.max(frameCount, 1)
       } else if (msg.type === 'done') {
         worker.terminate()
-        resolveLoad()
+        this.lerpProgress = 1
+        this.loadPhase    = 0
+        console.log(`[GifEngine] ${this.naturalWidth}×${this.naturalHeight}, ${this.frames.length} frames ready`)
       }
     }
     worker.onerror = (e) => {
-      console.error('[gif-worker]', e)
+      console.error('[GifEngine] worker-error:', e)
       worker.terminate()
-      resolveLoad()
     }
 
     // buf를 복사해 Worker에 전달 — 원본은 glow mask 생성용으로 보관
     const workerBuf = buf.slice(0)
     worker.postMessage({ buf: workerBuf, forGlowMask: false }, [workerBuf])
-
-    await loadDone  // Worker 완료까지 대기 (메인 스레드는 자유롭게 실행)
-
-    const rawFrames = [...this.frames]
-    const W = this.naturalWidth, H = this.naturalHeight
-    this.lerpProgress = 0
-    console.log(`[GifEngine] ${W}×${H}, ${rawFrames.length} raw frames ready, lerp expanding in background`)
-
-    // lerp 확장은 백그라운드에서 — 완료 후 교체
-    this.lerpExpand(rawFrames, W, H, 24).then(expanded => {
-      const ratio = rawFrames.length > 0 ? this.idx / rawFrames.length : 0
-      this.frames  = expanded
-      this.idx     = Math.min(Math.floor(ratio * expanded.length), expanded.length - 1)
-      this.lerpProgress = 1
-      this.loadPhase    = 0
-      const delays = expanded.map(f => f.delay)
-      console.log(`[GifEngine] lerp done: ${expanded.length} frames, delay ${Math.min(...delays)}~${Math.max(...delays)}ms`)
-    })
-  }
-
-  private async lerpExpand(src: Frame[], W: number, H: number, targetFps = 60): Promise<Frame[]> {
-    const result: Frame[] = []
-    const msPerFrame = 1000 / targetFps
-    const MAX_EFFECTIVE_DELAY = 100
-    for (let i = 0; i < src.length; i++) {
-      this.lerpProgress = i / src.length
-      const curr = src[i]
-      const next = src[(i + 1) % src.length]
-      const effectiveDelay = Math.min(curr.delay, MAX_EFFECTIVE_DELAY)
-      const steps = Math.max(1, Math.round(effectiveDelay / msPerFrame))
-      const stepDelay = effectiveDelay / steps
-      result.push({ bitmap: curr.bitmap, delay: stepDelay })
-      for (let s = 1; s < steps; s++) {
-        result.push({ bitmap: await this.lerpBitmap(curr.bitmap, next.bitmap, s / steps, W, H), delay: stepDelay })
-      }
-    }
-    return result
-  }
-
-  private async lerpBitmap(a: ImageBitmap, b: ImageBitmap, t: number, W: number, H: number): Promise<ImageBitmap> {
-    const oc  = new OffscreenCanvas(W, H)
-    const ctx = oc.getContext('2d', { willReadFrequently: true })!
-
-    ctx.drawImage(a, 0, 0)
-    const dA = ctx.getImageData(0, 0, W, H).data
-
-    ctx.clearRect(0, 0, W, H)
-    ctx.drawImage(b, 0, 0)
-    const dB = ctx.getImageData(0, 0, W, H).data
-
-    const out = ctx.createImageData(W, H)
-    const d   = out.data
-    const inv = 1 - t
-    for (let i = 0; i < d.length; i += 4) {
-      const aA = dA[i+3], aB = dB[i+3]
-      const alpha = aA * inv + aB * t
-      d[i+3] = alpha
-      if (alpha > 0) {
-        // premultiplied alpha 보간 — 투명 픽셀 색상이 경계에 번지지 않음
-        d[i]   = (dA[i]   * aA * inv + dB[i]   * aB * t) / alpha
-        d[i+1] = (dA[i+1] * aA * inv + dB[i+1] * aB * t) / alpha
-        d[i+2] = (dA[i+2] * aA * inv + dB[i+2] * aB * t) / alpha
-      } else {
-        d[i] = d[i+1] = d[i+2] = 0
-      }
-    }
-    ctx.putImageData(out, 0, 0)
-    return createImageBitmap(oc)
+    // Worker가 백그라운드에서 lerp까지 처리 — 메인 스레드 블로킹 없음
   }
 
   // ── 공개 API ────────────────────────────────────────────
