@@ -11,6 +11,7 @@ files:
   - dist/**/*
   - '!dist/renderer/characters/**'
   - assets/*.gif
+  - assets/icons/**/*
   - '!src/**/*'
   - '!electron.vite.config.*'
 
@@ -18,6 +19,8 @@ win:
   icon: resources/icon.ico
   target:
     - target: msi
+      arch: x64
+    - target: portable
       arch: x64
 
 msi:
@@ -27,7 +30,7 @@ msi:
   runAfterFinish: true
 
 mac:
-  icon: resources/icon.icns
+  icon: assets/icons/app/peeking-1024.png
   target:
     - target: dmg
       arch:

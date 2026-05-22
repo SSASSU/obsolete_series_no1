@@ -1,4 +1,4 @@
-import { BrowserWindow } from 'electron'
+import { BrowserWindow, app } from 'electron'
 import { join } from 'path'
 
 let win: BrowserWindow | null = null
@@ -17,6 +17,7 @@ export function createSettingsWindow(): void {
     transparent: false,
     skipTaskbar: false,
     alwaysOnTop: true,
+    icon: join(app.getAppPath(), 'assets/icons/app/peeking-256.png'),
     webPreferences: {
       contextIsolation: true,
       preload: join(__dirname, '../preload/settings.js')

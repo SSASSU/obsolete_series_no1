@@ -1,10 +1,18 @@
-import { Tray, Menu, app, nativeImage, shell } from 'electron'
+import { Tray, Menu, app, nativeImage, shell, nativeTheme } from 'electron'
 import { join } from 'path'
 import { store } from './store'
 import { createSettingsWindow } from './settings-window'
 import { setVisible } from './overlay'
 
 let tray: Tray | null = null
+
+function loadTrayIcon(): Electron.NativeImage {
+  const theme = nativeTheme.shouldUseDarkColors ? 'light' : 'dark'
+  const icon = nativeImage.createFromPath(
+    join(app.getAppPath(), `assets/icons/tray/tray-${theme}-32.png`)
+  )
+  return icon.isEmpty() ? nativeImage.createEmpty() : icon
+}
 
 export function updateTrayTooltip(tpm: number, maxTpm: number): void {
   if (!tray) return
@@ -15,10 +23,11 @@ export function updateTrayTooltip(tpm: number, maxTpm: number): void {
 }
 
 export function setupTray(): void {
-  const iconPath = join(__dirname, '../../resources/tray.png')
-  const icon = nativeImage.createFromPath(iconPath)
-  tray = new Tray(icon.isEmpty() ? nativeImage.createEmpty() : icon)
+  tray = new Tray(loadTrayIcon())
   tray.setToolTip('obsolete_series_no1')
+
+  nativeTheme.on('updated', () => tray?.setImage(loadTrayIcon()))
+
   refreshMenu()
 }
 
