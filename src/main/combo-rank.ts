@@ -1,9 +1,9 @@
 export const RANKS = ['D', 'C', 'B', 'A', 'S', 'SS', 'SSS'] as const
 export type Rank = typeof RANKS[number]
 
-// TPM 기준 랭크 진입 임계값 (실측: 막 눌러도 ~200 TPM)
+// TPM 기준 랭크 진입 임계값
 const RANK_ENTER_WPM: Record<Rank, number> = {
-  D: 0, C: 20, B: 50, A: 90, S: 130, SS: 165, SSS: 195
+  D: 0, C: 20, B: 50, A: 90, S: 140, SS: 180, SSS: 198
 }
 
 // 랭크 하락 유예 시간 — DMC 콤보 유지 감각
