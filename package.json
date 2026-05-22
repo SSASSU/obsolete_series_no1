@@ -1,6 +1,6 @@
 {
   "name": "obsolete-series-no1",
-  "version": "0.2.0",
+  "version": "0.2.3",
   "description": "타이핑하면 밈이 반응하는 데스크탑 펫",
   "main": "dist/main/index.js",
   "author": "obsolete-series",
