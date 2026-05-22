@@ -3,15 +3,36 @@ const { join } = require('path')
 
 const KEEP = new Set(['en-US.pak', 'ko.pak'])
 
+function prunePakDir(dir) {
+  let removed = 0
+  for (const file of readdirSync(dir)) {
+    if (file.endsWith('.pak') && !KEEP.has(file)) {
+      rmSync(join(dir, file))
+      removed++
+    }
+  }
+  return removed
+}
+
 exports.default = async ({ appOutDir }) => {
-  const localesDir = join(appOutDir, 'locales')
-  // mac 빌드는 locales가 .app/Contents/Frameworks/... 내부에 있어 이 경로엔 없음 — skip
-  if (!existsSync(localesDir)) {
-    console.log(`  • locales pruning skipped (no ${localesDir})`)
+  // Windows / Linux: <appOutDir>/locales/*.pak
+  const winLocalesDir = join(appOutDir, 'locales')
+  if (existsSync(winLocalesDir)) {
+    const removed = prunePakDir(winLocalesDir)
+    console.log(`  • locales pruned (${removed} removed) — kept: ${[...KEEP].join(', ')}`)
     return
   }
-  for (const file of readdirSync(localesDir)) {
-    if (!KEEP.has(file)) rmSync(join(localesDir, file))
+
+  // macOS: <appOutDir>/<AppName>.app/Contents/Frameworks/Electron Framework.framework/Versions/A/Resources/*.pak
+  const apps = readdirSync(appOutDir).filter(f => f.endsWith('.app'))
+  for (const app of apps) {
+    const resPath = join(
+      appOutDir, app,
+      'Contents/Frameworks/Electron Framework.framework/Versions/A/Resources'
+    )
+    if (existsSync(resPath)) {
+      const removed = prunePakDir(resPath)
+      console.log(`  • [${app}] locales pruned (${removed} removed) — kept: ${[...KEEP].join(', ')}`)
+    }
   }
-  console.log(`  • locales pruned — kept: ${[...KEEP].join(', ')}`)
 }

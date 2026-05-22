@@ -27,10 +27,12 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Upload MSI to Release
+      - name: Upload Windows artifacts to Release
         uses: softprops/action-gh-release@v2
         with:
-          files: dist-electron/*.msi
+          files: |
+            dist-electron/*.msi
+            dist-electron/*.exe
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
