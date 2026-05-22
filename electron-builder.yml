@@ -39,6 +39,5 @@ mac:
 
 afterPack: scripts/afterPack.js
 
-publish:
-  provider: github
-  releaseType: release
+# publish는 .github/workflows/release.yml 의 softprops/action-gh-release 에서 처리
+# (electron-builder 의 GitHub publish 와 동시 사용 시 token 권한 충돌 발생)
